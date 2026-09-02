@@ -5,9 +5,6 @@ import unittest
 from types import ModuleType
 
 
-fastmcp = ModuleType("fastmcp")
-
-
 class FakeFastMCP:
     def __init__(self, *args, **kwargs):
         pass
@@ -16,8 +13,19 @@ class FakeFastMCP:
         return lambda function: function
 
 
-fastmcp.FastMCP = FakeFastMCP
-sys.modules["fastmcp"] = fastmcp
+mcp = ModuleType("mcp")
+mcp_server = ModuleType("mcp.server")
+mcpserver = ModuleType("mcp.server.mcpserver")
+mcpserver.MCPServer = FakeFastMCP
+sys.modules["mcp"] = mcp
+sys.modules["mcp.server"] = mcp_server
+sys.modules["mcp.server.mcpserver"] = mcpserver
+
+powermcp_sandbox = ModuleType("powermcp.sandbox")
+powermcp_sandbox.checked_path = lambda path, **kwargs: path
+powermcp_sandbox.checked_read_tree = lambda *args, **kwargs: []
+powermcp_sandbox.ensure_checked_directory = lambda path, **kwargs: path
+sys.modules["powermcp.sandbox"] = powermcp_sandbox
 
 
 class FakeAgent:
@@ -44,12 +52,14 @@ class FakeObject:
         full_name,
         attributes=None,
         contents=None,
+        parent=None,
     ):
         self.class_name = class_name
         self.full_name = full_name
         self.attributes = {"loc_name": name}
         self.attributes.update(attributes or {})
         self.contents = contents or {}
+        self.parent = parent
 
     def GetAttribute(self, attribute):
         return self.attributes[attribute]
@@ -59,6 +69,9 @@ class FakeObject:
 
     def GetFullName(self):
         return self.full_name
+
+    def GetParent(self):
+        return self.parent
 
     def GetContents(self, pattern, recursive):
         return self.contents.get(pattern, [])
@@ -93,6 +106,173 @@ class FakeApplication:
 
 
 class StateInspectionTest(unittest.TestCase):
+    def test_get_network_topology(self):
+        project = FakeObject("test", "IntPrj", r"\user\test.IntPrj")
+        study_case = FakeObject(
+            "Case 1",
+            "IntCase",
+            r"\user\test.IntPrj\Study Cases\Case 1.IntCase",
+        )
+        bus_1 = FakeObject(
+            "Bus 01",
+            "ElmTerm",
+            r"\user\test.IntPrj\Grid\Bus 01.ElmTerm",
+            {"outserv": 0, "uknom": 345.0},
+        )
+        bus_2 = FakeObject(
+            "Bus 02",
+            "ElmTerm",
+            r"\user\test.IntPrj\Grid\Bus 02.ElmTerm",
+            {"outserv": 0, "uknom": 345.0},
+        )
+        bus_3 = FakeObject(
+            "Bus 03",
+            "ElmTerm",
+            r"\user\test.IntPrj\Grid\Bus 03.ElmTerm",
+            {"outserv": 1, "uknom": 110.0},
+        )
+
+        closed_switch = FakeObject(
+            "Switch",
+            "StaSwitch",
+            r"\user\test.IntPrj\Grid\Bus 01\Line Cubi\Switch.StaSwitch",
+            {"on_off": 1},
+        )
+        open_switch = FakeObject(
+            "Switch",
+            "StaSwitch",
+            r"\user\test.IntPrj\Grid\Bus 02\Trf Cubi\Switch.StaSwitch",
+            {"on_off": 0},
+        )
+        line_cubicle_1 = FakeObject(
+            "Line Cubi",
+            "StaCubic",
+            r"\user\test.IntPrj\Grid\Bus 01\Line Cubi.StaCubic",
+            contents={"*.StaSwitch": [closed_switch]},
+            parent=bus_1,
+        )
+        line_cubicle_2 = FakeObject(
+            "Line Cubi",
+            "StaCubic",
+            r"\user\test.IntPrj\Grid\Bus 02\Line Cubi.StaCubic",
+            parent=bus_2,
+        )
+        transformer_cubicle_1 = FakeObject(
+            "Trf Cubi",
+            "StaCubic",
+            r"\user\test.IntPrj\Grid\Bus 02\Trf Cubi.StaCubic",
+            contents={"*.StaSwitch": [open_switch]},
+            parent=bus_2,
+        )
+        transformer_cubicle_2 = FakeObject(
+            "Trf Cubi",
+            "StaCubic",
+            r"\user\test.IntPrj\Grid\Bus 03\Trf Cubi.StaCubic",
+            parent=bus_3,
+        )
+        line = FakeObject(
+            "Line 01 - 02",
+            "ElmLne",
+            r"\user\test.IntPrj\Grid\Line 01 - 02.ElmLne",
+            {
+                "bus1": line_cubicle_1,
+                "bus2": line_cubicle_2,
+                "outserv": 0,
+            },
+        )
+        transformer = FakeObject(
+            "Trf 02 - 03",
+            "ElmTr2",
+            r"\user\test.IntPrj\Grid\Trf 02 - 03.ElmTr2",
+            {
+                "bushv": transformer_cubicle_1,
+                "buslv": transformer_cubicle_2,
+                "outserv": 0,
+            },
+        )
+        coupler = FakeObject(
+            "Open Coupler",
+            "ElmCoup",
+            r"\user\test.IntPrj\Grid\Open Coupler.ElmCoup",
+            {
+                "bus1": line_cubicle_1,
+                "bus2": line_cubicle_2,
+                "outserv": 0,
+                "on_off": 0,
+            },
+        )
+        unresolved = FakeObject(
+            "Broken Line",
+            "ElmLne",
+            r"\user\test.IntPrj\Grid\Broken Line.ElmLne",
+            {"bus1": line_cubicle_1, "bus2": None, "outserv": 0},
+        )
+        grid = FakeObject(
+            "Grid",
+            "ElmNet",
+            r"\user\test.IntPrj\Grid.ElmNet",
+            contents={
+                "*.ElmTerm": [bus_1, bus_2, bus_3],
+                "*.ElmLne": [line, unresolved],
+                "*.ElmTr2": [transformer],
+                "*.ElmCoup": [coupler],
+            },
+        )
+
+        FakeAgent._shared_app = FakeApplication(
+            project=project,
+            active_case=study_case,
+            study_cases=[study_case],
+            objects={"*.ElmNet": [grid]},
+        )
+        FakeAgent._select_grid = staticmethod(
+            lambda app, grid_name: app.GetCalcRelevantObjects("*.ElmNet")[0]
+        )
+
+        topology = json.loads(
+            mcp_module.get_network_topology(
+                "Grid",
+                in_service_only=True,
+                include_adjacency=True,
+            )
+        )
+
+        self.assertTrue(topology["success"])
+        self.assertEqual(topology["node_count"], 2)
+        self.assertEqual(topology["edge_count"], 1)
+        self.assertEqual(topology["edges"][0]["kind"], "line")
+        self.assertTrue(topology["edges"][0]["in_service"])
+        self.assertEqual(len(topology["unresolved_edges"]), 1)
+        self.assertEqual(
+            topology["adjacency"][bus_1.GetFullName()],
+            [bus_2.GetFullName()],
+        )
+        self.assertEqual(
+            topology["adjacency"][bus_2.GetFullName()],
+            [bus_1.GetFullName()],
+        )
+
+        complete = json.loads(
+            mcp_module.get_network_topology(
+                "Grid",
+                in_service_only=False,
+            )
+        )
+        self.assertEqual(complete["node_count"], 3)
+        self.assertEqual(complete["edge_count"], 3)
+        transformer_edge = next(
+            edge
+            for edge in complete["edges"]
+            if edge["kind"] == "transformer"
+        )
+        self.assertFalse(transformer_edge["in_service"])
+        coupler_edge = next(
+            edge
+            for edge in complete["edges"]
+            if edge["kind"] == "coupler"
+        )
+        self.assertFalse(coupler_edge["in_service"])
+
     def test_get_network_info(self):
         project = FakeObject(
             "test",

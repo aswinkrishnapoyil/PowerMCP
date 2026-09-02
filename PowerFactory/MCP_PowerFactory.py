@@ -16,6 +16,7 @@ Tools
   *get_active_study_case Return the active PowerFactory study case.
   *get_parameters        Read selected attributes from matching objects.
   *get_network_info      Summarise the selected active network grid.
+  *get_network_topology  Return bus-and-branch graph data for a grid.
   *list_objects          List objects using a PowerFactory object query.
   *list_components       List objects using friendly equipment categories.
   *list_study_cases      List study cases and identify the active case.
@@ -482,6 +483,212 @@ def get_network_info(grid_name: str = "") -> str:
             "circuit_breaker_states": breaker_states,
             "voltage_levels_kv": sorted(voltage_levels),
         }
+
+    return _to_json(_pf(_impl))
+
+
+@mcp.tool()
+def get_network_topology(
+    grid_name: str = "",
+    in_service_only: bool = True,
+    include_adjacency: bool = False,
+) -> str:
+    """Return buses and connected branches from the selected grid.
+
+    Lines, two-winding transformers, and couplers become undirected edges.
+    When in_service_only is true, out-of-service equipment and connections
+    with open cubicle circuit breakers are excluded. Set include_adjacency to
+    include a node-to-neighbours mapping.
+    """
+    _, DIgSILENTAgent = _load_modules()
+
+    def _impl():
+        app = DIgSILENTAgent._shared_app
+        if app is None:
+            return {
+                "success": False,
+                "message": "PowerFactory is not connected",
+            }
+
+        project = app.GetActiveProject()
+        if project is None:
+            return {
+                "success": False,
+                "message": "No PowerFactory project is active",
+            }
+
+        study_case = app.GetActiveStudyCase()
+        if study_case is None:
+            return {
+                "success": False,
+                "message": "No PowerFactory study case is active",
+            }
+
+        try:
+            grid = DIgSILENTAgent._select_grid(app, grid_name)
+        except Exception as exc:
+            return {"success": False, "message": str(exc)}
+
+        def _out_of_service(obj):
+            try:
+                return bool(obj.GetAttribute("outserv"))
+            except Exception:
+                return None
+
+        all_buses = grid.GetContents("*.ElmTerm", 1) or []
+        buses = {}
+        nodes = []
+        for bus in all_buses:
+            full_name = bus.GetFullName()
+            out_of_service = _out_of_service(bus)
+            buses[full_name] = bus
+            if in_service_only and out_of_service:
+                continue
+            try:
+                nominal_voltage = float(bus.GetAttribute("uknom"))
+            except Exception:
+                nominal_voltage = None
+            nodes.append({
+                "id": full_name,
+                "name": bus.GetAttribute("loc_name"),
+                "nominal_voltage_kv": nominal_voltage,
+                "out_of_service": out_of_service,
+            })
+
+        def _endpoint(connection):
+            if connection is None:
+                return None
+            try:
+                if connection.GetClassName() == "ElmTerm":
+                    return connection
+            except Exception:
+                pass
+            try:
+                return connection.GetParent()
+            except Exception:
+                return None
+
+        def _connection_closed(connection):
+            try:
+                if connection.GetClassName() == "ElmTerm":
+                    return True
+            except Exception:
+                pass
+            try:
+                switches = connection.GetContents("*.StaSwitch", 1) or []
+            except Exception:
+                switches = []
+            for switch in switches:
+                try:
+                    if not switch.GetAttribute("on_off"):
+                        return False
+                except Exception:
+                    return False
+            return True
+
+        branch_types = (
+            ("*.ElmLne", "line", "bus1", "bus2"),
+            ("*.ElmTr2", "transformer", "bushv", "buslv"),
+            ("*.ElmCoup", "coupler", "bus1", "bus2"),
+        )
+        edges = []
+        unresolved_edges = []
+
+        for query, kind, source_attribute, target_attribute in branch_types:
+            for branch in grid.GetContents(query, 1) or []:
+                try:
+                    source_connection = branch.GetAttribute(source_attribute)
+                    target_connection = branch.GetAttribute(target_attribute)
+                    source = _endpoint(source_connection)
+                    target = _endpoint(target_connection)
+                    if source is None or target is None:
+                        raise ValueError("missing endpoint connection")
+
+                    source_id = source.GetFullName()
+                    target_id = target.GetFullName()
+                    if source_id not in buses or target_id not in buses:
+                        raise ValueError("endpoint bus is outside the selected grid")
+                except Exception as exc:
+                    unresolved_edges.append({
+                        "id": branch.GetFullName(),
+                        "name": branch.GetAttribute("loc_name"),
+                        "class_name": branch.GetClassName(),
+                        "reason": str(exc),
+                    })
+                    continue
+
+                out_of_service = _out_of_service(branch)
+                in_service = not bool(out_of_service)
+                in_service = in_service and not bool(
+                    _out_of_service(source)
+                )
+                in_service = in_service and not bool(
+                    _out_of_service(target)
+                )
+                in_service = in_service and _connection_closed(
+                    source_connection
+                )
+                in_service = in_service and _connection_closed(
+                    target_connection
+                )
+
+                if branch.GetClassName() == "ElmCoup":
+                    try:
+                        in_service = in_service and bool(
+                            branch.GetAttribute("on_off")
+                        )
+                    except Exception:
+                        pass
+
+                if in_service_only and not in_service:
+                    continue
+
+                edges.append({
+                    "id": branch.GetFullName(),
+                    "name": branch.GetAttribute("loc_name"),
+                    "class_name": branch.GetClassName(),
+                    "kind": kind,
+                    "source": source_id,
+                    "source_name": source.GetAttribute("loc_name"),
+                    "target": target_id,
+                    "target_name": target.GetAttribute("loc_name"),
+                    "out_of_service": out_of_service,
+                    "in_service": in_service,
+                })
+
+        result = {
+            "success": True,
+            "project": {
+                "name": project.GetAttribute("loc_name"),
+                "full_name": project.GetFullName(),
+            },
+            "study_case": {
+                "name": study_case.GetAttribute("loc_name"),
+                "full_name": study_case.GetFullName(),
+            },
+            "grid": {
+                "name": grid.GetAttribute("loc_name"),
+                "full_name": grid.GetFullName(),
+            },
+            "in_service_only": bool(in_service_only),
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+            "nodes": nodes,
+            "edges": edges,
+            "unresolved_edges": unresolved_edges,
+        }
+
+        if include_adjacency:
+            adjacency = {node["id"]: set() for node in nodes}
+            for edge in edges:
+                adjacency[edge["source"]].add(edge["target"])
+                adjacency[edge["target"]].add(edge["source"])
+            result["adjacency"] = {
+                node_id: sorted(neighbours)
+                for node_id, neighbours in adjacency.items()
+            }
+
+        return result
 
     return _to_json(_pf(_impl))
 
