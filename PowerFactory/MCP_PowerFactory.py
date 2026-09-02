@@ -15,6 +15,7 @@ Tools
   *get_active_project    Return the active PowerFactory project.
   *get_active_study_case Return the active PowerFactory study case.
   *get_parameters        Read selected attributes from matching objects.
+  *get_network_info      Summarise the selected active network grid.
   *list_objects          List objects using a PowerFactory object query.
   *list_components       List objects using friendly equipment categories.
   *list_study_cases      List study cases and identify the active case.
@@ -375,6 +376,114 @@ _COMPONENT_QUERIES = {
     "external_grids": ("*.ElmXnet",),
     "switches": ("*.ElmCoup",),
 }
+
+
+@mcp.tool()
+def get_network_info(grid_name: str = "") -> str:
+    """Return a compact summary of the selected active network grid."""
+    _, DIgSILENTAgent = _load_modules()
+
+    def _impl():
+        app = DIgSILENTAgent._shared_app
+        if app is None:
+            return {
+                "success": False,
+                "message": "PowerFactory is not connected",
+            }
+
+        project = app.GetActiveProject()
+        if project is None:
+            return {
+                "success": False,
+                "message": "No PowerFactory project is active",
+            }
+
+        study_case = app.GetActiveStudyCase()
+        if study_case is None:
+            return {
+                "success": False,
+                "message": "No PowerFactory study case is active",
+            }
+
+        try:
+            grid = DIgSILENTAgent._select_grid(app, grid_name)
+        except Exception as exc:
+            return {"success": False, "message": str(exc)}
+
+        queries = {
+            category: _COMPONENT_QUERIES[category]
+            for category in (
+                "buses",
+                "lines",
+                "transformers",
+                "loads",
+                "generators",
+                "storage",
+                "external_grids",
+                "switches",
+            )
+        }
+        queries["circuit_breakers"] = ("*.StaSwitch",)
+
+        objects_by_category = {}
+        for category, category_queries in queries.items():
+            objects = {}
+            for query in category_queries:
+                for obj in grid.GetContents(query, 1) or []:
+                    objects[obj.GetFullName()] = obj
+            objects_by_category[category] = list(objects.values())
+
+        out_of_service_counts = {}
+        for category, objects in objects_by_category.items():
+            if category == "circuit_breakers":
+                continue
+            count = 0
+            for obj in objects:
+                try:
+                    count += bool(obj.GetAttribute("outserv"))
+                except Exception:
+                    pass
+            out_of_service_counts[category] = count
+
+        breaker_states = {"closed": 0, "open": 0, "unknown": 0}
+        for breaker in objects_by_category["circuit_breakers"]:
+            try:
+                state = "closed" if breaker.GetAttribute("on_off") else "open"
+            except Exception:
+                state = "unknown"
+            breaker_states[state] += 1
+
+        voltage_levels = set()
+        for bus in objects_by_category["buses"]:
+            try:
+                voltage_levels.add(float(bus.GetAttribute("uknom")))
+            except Exception:
+                pass
+
+        return {
+            "success": True,
+            "project": {
+                "name": project.GetAttribute("loc_name"),
+                "full_name": project.GetFullName(),
+            },
+            "study_case": {
+                "name": study_case.GetAttribute("loc_name"),
+                "full_name": study_case.GetFullName(),
+            },
+            "grid": {
+                "name": grid.GetAttribute("loc_name"),
+                "full_name": grid.GetFullName(),
+            },
+            "component_counts": {
+                category: len(objects)
+                for category, objects in objects_by_category.items()
+            },
+            "out_of_service_counts": out_of_service_counts,
+            "circuit_breaker_states": breaker_states,
+            "voltage_levels_kv": sorted(voltage_levels),
+        }
+
+    return _to_json(_pf(_impl))
 
 @mcp.tool()
 def list_objects(object_query: str = "*.ElmTerm", max_results: int = 100) -> str:

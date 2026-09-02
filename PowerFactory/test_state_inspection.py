@@ -37,11 +37,19 @@ mcp_module._pf = lambda function, *args, **kwargs: function(*args, **kwargs)
 
 
 class FakeObject:
-    def __init__(self, name, class_name, full_name, attributes=None):
+    def __init__(
+        self,
+        name,
+        class_name,
+        full_name,
+        attributes=None,
+        contents=None,
+    ):
         self.class_name = class_name
         self.full_name = full_name
         self.attributes = {"loc_name": name}
         self.attributes.update(attributes or {})
+        self.contents = contents or {}
 
     def GetAttribute(self, attribute):
         return self.attributes[attribute]
@@ -51,6 +59,9 @@ class FakeObject:
 
     def GetFullName(self):
         return self.full_name
+
+    def GetContents(self, pattern, recursive):
+        return self.contents.get(pattern, [])
 
 
 class FakeFolder:
@@ -82,6 +93,75 @@ class FakeApplication:
 
 
 class StateInspectionTest(unittest.TestCase):
+    def test_get_network_info(self):
+        project = FakeObject(
+            "test",
+            "IntPrj",
+            r"\user\test.IntPrj",
+        )
+        study_case = FakeObject(
+            "Case 1",
+            "IntCase",
+            r"\user\test.IntPrj\Study Cases\Case 1.IntCase",
+        )
+        bus_1 = FakeObject(
+            "Bus 01",
+            "ElmTerm",
+            r"\user\test.IntPrj\Grid\Bus 01.ElmTerm",
+            {"outserv": 0, "uknom": 345.0},
+        )
+        bus_2 = FakeObject(
+            "Bus 02",
+            "ElmTerm",
+            r"\user\test.IntPrj\Grid\Bus 02.ElmTerm",
+            {"outserv": 1, "uknom": 110.0},
+        )
+        line = FakeObject(
+            "Line 01 - 02",
+            "ElmLne",
+            r"\user\test.IntPrj\Grid\Line 01 - 02.ElmLne",
+            {"outserv": 0},
+        )
+        breaker = FakeObject(
+            "Switch",
+            "StaSwitch",
+            r"\user\test.IntPrj\Grid\Bus 01\Cubi\Switch.StaSwitch",
+            {"on_off": 1},
+        )
+        grid = FakeObject(
+            "Grid",
+            "ElmNet",
+            r"\user\test.IntPrj\Grid.ElmNet",
+            contents={
+                "*.ElmTerm": [bus_1, bus_2],
+                "*.ElmLne": [line],
+                "*.StaSwitch": [breaker],
+            },
+        )
+
+        FakeAgent._shared_app = FakeApplication(
+            project=project,
+            active_case=study_case,
+            study_cases=[study_case],
+            objects={"*.ElmNet": [grid]},
+        )
+        FakeAgent._select_grid = staticmethod(
+            lambda app, grid_name: app.GetCalcRelevantObjects("*.ElmNet")[0]
+        )
+
+        info = json.loads(mcp_module.get_network_info("Grid"))
+
+        self.assertTrue(info["success"])
+        self.assertEqual(info["project"]["name"], "test")
+        self.assertEqual(info["study_case"]["name"], "Case 1")
+        self.assertEqual(info["grid"]["name"], "Grid")
+        self.assertEqual(info["component_counts"]["buses"], 2)
+        self.assertEqual(info["component_counts"]["lines"], 1)
+        self.assertEqual(info["component_counts"]["circuit_breakers"], 1)
+        self.assertEqual(info["out_of_service_counts"]["buses"], 1)
+        self.assertEqual(info["circuit_breaker_states"]["closed"], 1)
+        self.assertEqual(info["voltage_levels_kv"], [110.0, 345.0])
+
     def test_state_and_discovery_tools(self):
         project = FakeObject(
             "test",

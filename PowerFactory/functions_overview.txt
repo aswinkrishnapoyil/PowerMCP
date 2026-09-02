@@ -26,6 +26,7 @@ Implemented MCP tools
 - get_active_project: returns the active PowerFactory project.
 - get_active_study_case: returns the active study case.
 - get_parameters: reads selected attributes from matching objects.
+- get_network_info: summarizes components, service states, circuit breakers, and voltage levels in the selected active grid.
 - list_objects: lists objects using a PowerFactory object query.
 - list_components: lists objects using friendly equipment categories.
 - list_study_cases: lists study cases and identifies the active case.
