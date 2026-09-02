@@ -28,16 +28,17 @@ Tests recorded as passing:
 9. test_delete_component_updates_active_diagram
 10. test_update_active_diagram_uses_k_neighbourhood
 11. test_get_network_info
-12. test_list_components
-13. test_state_and_discovery_tools
+12. test_get_network_topology
+13. test_list_components
+14. test_state_and_discovery_tools
 
 Final unittest result:
 
 ----------------------------------------------------------------------
-Ran 13 tests in 0.007s
+Ran 14 tests in 0.008s
 
 OK
 
 Interpretation:
 
-The [ERROR] lines printed during the test run were expected negative-path logs from deliberate duplicate, invalid-input, missing-object, confirmation, and rollback tests. The unittest runner's final result was OK. The line-creation test additionally verified one closed `StaSwitch` circuit breaker (`aUsage="cbk"`, `on_off=1`) in each endpoint cubicle. The graphical tests verified requested insertion, K-neighbourhood layout execution, graphical-object deletion, and application rebuild. The network-information test verified selected-grid context, component counts, out-of-service counts, circuit-breaker state totals, and voltage levels.
+The [ERROR] lines printed during the test run were expected negative-path logs from deliberate duplicate, invalid-input, missing-object, confirmation, and rollback tests. The unittest runner's final result was OK. The line-creation test additionally verified one closed `StaSwitch` circuit breaker (`aUsage="cbk"`, `on_off=1`) in each endpoint cubicle. The graphical tests verified requested insertion, K-neighbourhood layout execution, graphical-object deletion, and application rebuild. The network-information test verified selected-grid context, component counts, out-of-service counts, circuit-breaker state totals, and voltage levels. The topology test verified bus and branch graph construction, breaker-aware filtering, out-of-service filtering, unresolved connections, coupler state, and symmetric adjacency.

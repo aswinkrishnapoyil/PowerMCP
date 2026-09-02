@@ -52,6 +52,7 @@ Output folder:  CSV results · PNG plots · optional .pfd export
 | `get_active_study_case` | Returns the active PowerFactory study case without modifying it. |
 | `get_parameters` | Reads selected attributes from objects matching a PowerFactory query. |
 | `get_network_info` | Returns selected-grid component, service-state, circuit-breaker, and voltage-level summaries. |
+| `get_network_topology` | Returns buses and connected lines, two-winding transformers, and couplers as graph nodes and edges, with breaker-aware service filtering and optional adjacency. |
 | `list_objects` | Lists calculation-relevant objects using a raw PowerFactory query. |
 | `list_components` | Lists objects using friendly equipment categories. |
 | `list_study_cases` | Lists study cases and identifies the active case. |

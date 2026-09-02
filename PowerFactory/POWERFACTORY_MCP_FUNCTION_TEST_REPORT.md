@@ -23,7 +23,7 @@ Related implementation report: [PowerMCP PowerFactory Tooling Contribution Repor
 
 ## 1. Test objective
 
-The objective was to verify that all nine locally contributed MCP tools behave correctly against a live PowerFactory project and that the model remains calculation-ready after temporary modifications and cleanup. The extended verification also covered single-line diagram synchronization and automatic circuit-breaker creation inside generated cubicles.
+The objective was to verify that all ten locally contributed MCP tools behave correctly against a live PowerFactory project and that the model remains calculation-ready after temporary modifications and cleanup. The extended verification also covered network topology, single-line diagram synchronization, and automatic circuit-breaker creation inside generated cubicles.
 
 The contributed tools under test were:
 
@@ -31,11 +31,12 @@ The contributed tools under test were:
 2. `get_active_study_case`
 3. `get_parameters`
 4. `get_network_info`
-5. `list_objects`
-6. `list_components`
-7. `list_study_cases`
-8. `add_component`
-9. `delete_component`
+5. `get_network_topology`
+6. `list_objects`
+7. `list_components`
+8. `list_study_cases`
+9. `add_component`
+10. `delete_component`
 
 Existing PowerMCP tools-`ping`, `create_study_case`, `run_loadflow`, and `run_short_circuit`-were used as supporting verification operations. They are not claimed as contributions in this report.
 
@@ -54,6 +55,7 @@ A test was considered successful when:
 - The MCP response contained `success=true` where applicable.
 - Returned project, study-case, object, and attribute data matched the live PowerFactory model.
 - Network-summary counts, voltage levels, and circuit-breaker states matched independent read-only queries.
+- Topology counts matched the network summary, every edge endpoint existed, and optional adjacency was complete and symmetric.
 - Created equipment retained its requested class, attributes, type, terminal connections, and service state.
 - Load-flow and short-circuit calculations completed successfully with temporary equipment in service.
 - Confirmed deletion removed the target and its associated cubicles.
@@ -81,10 +83,11 @@ A test was considered successful when:
 | FT-10 | Single-line diagram insertion, deletion, and refresh | PASS WITH DOCUMENTED LIMITATION |
 | FT-11 | Automatic circuit-breaker creation and cleanup | PASS |
 | FT-12 | Read-only network information summary | PASS |
+| FT-13 | Read-only network topology and adjacency | PASS |
 
 **Overall outcome: PASS**
 
-All nine contributed functions and the two extended component-management behaviors were verified. No temporary test component or generated test switchgear remained in the PowerFactory model at the end of testing.
+All ten contributed functions and the two extended component-management behaviors were verified. No temporary test component or generated test switchgear remained in the PowerFactory model at the end of testing.
 
 ## 4. Function-to-evidence traceability
 
@@ -94,6 +97,7 @@ All nine contributed functions and the two extended component-management behavio
 | `get_active_study_case` | `test_state_and_discovery_tools` | FT-01 | [FT-01](evidence/FT-01_active_context.txt) | VERIFIED |
 | `get_parameters` | `test_state_and_discovery_tools` | FT-02, FT-06, FT-07 | [FT-02](evidence/FT-02_parameter_inspection.txt), [FT-06](evidence/FT-06_generator_verification.txt), [FT-07](evidence/FT-07_transformer_verification.txt) | VERIFIED |
 | `get_network_info` | `test_get_network_info` | FT-12 | [FT-12](evidence/FT-12_network_information.txt) | VERIFIED |
+| `get_network_topology` | `test_get_network_topology` | FT-13 | [FT-13](evidence/FT-13_network_topology.txt) | VERIFIED |
 | `list_objects` | `test_state_and_discovery_tools` | FT-03, FT-09 | [FT-03](evidence/FT-03_component_discovery.txt), [FT-09](evidence/FT-09_cleanup_calculations.txt) | VERIFIED |
 | `list_components` | `test_list_components` | FT-03 | [FT-03](evidence/FT-03_component_discovery.txt) | VERIFIED |
 | `list_study_cases` | `test_state_and_discovery_tools` | FT-04 | [FT-04](evidence/FT-04_study_case_discovery.txt) | VERIFIED |
@@ -119,7 +123,7 @@ All nine contributed functions and the two extended component-management behavio
 ### Result
 
 ```text
-Ran 13 tests in 0.007s
+Ran 14 tests in 0.008s
 
 OK
 ```
@@ -139,6 +143,7 @@ OK
 | `test_delete_component_updates_active_diagram` | Graphical-object deletion and application rebuild | PASS |
 | `test_update_active_diagram_uses_k_neighbourhood` | K-neighbourhood selection, execution, restoration, and rebuild | PASS |
 | `test_get_network_info` | Selected-grid context, equipment counts, service state, breaker state, and voltage levels | PASS |
+| `test_get_network_topology` | Bus and branch graph construction, service filtering, unresolved endpoints, couplers, and adjacency | PASS |
 | `test_list_components` | Friendly category mapping, result limits, unsupported categories | PASS |
 | `test_state_and_discovery_tools` | Active state, parameter reads, raw object listing, study-case listing | PASS |
 
@@ -770,7 +775,37 @@ PowerFactory queries.
 
 **Supporting evidence:** [FT-12 network information](evidence/FT-12_network_information.txt)
 
-## 18. Deviations and observations
+## 18. Live test FT-13 - Network topology and adjacency
+
+### Objective
+
+Verify that `get_network_topology` returns an internally consistent read-only
+bus-and-branch graph for the selected PowerFactory grid.
+
+### Observed result
+
+With `in_service_only=true`, the tool returned 39 nodes, 46 edges, and no
+unresolved edge. With `in_service_only=false` and adjacency enabled, it again
+returned 39 nodes and 46 edges: 34 lines and 12 two-winding transformers.
+
+Every returned edge endpoint existed in the node list. The adjacency mapping
+contained all 39 nodes, every relationship was symmetric, and no edge was
+marked out of service. No PowerFactory object was modified and no calculation
+was run.
+
+Automated verification additionally covered an open cubicle circuit breaker,
+an open coupler, an out-of-service bus, and an unresolved endpoint.
+
+### Conclusion
+
+Topology counts, endpoint integrity, adjacency completeness, adjacency
+symmetry, service-state filtering, and unresolved-edge reporting passed.
+
+**Status: PASS**
+
+**Supporting evidence:** [FT-13 network topology](evidence/FT-13_network_topology.txt)
+
+## 19. Deviations and observations
 
 1. The VS Code AI client initially required deferred tool discovery before all read-only tools became visible. Once resolved, every requested tool executed successfully.
 2. FastMCP responses wrap the tool's JSON string in an outer `result` field. This report presents decoded inner JSON for readability while preserving the original meaning.
@@ -781,9 +816,9 @@ PowerFactory queries.
 7. Relay, CT, and VT creation is outside the present scope. The generated cubicles currently contain a circuit breaker only.
 8. Direct graphical insertion of an isolated bus can place it far from the existing network and expand the fitted viewport. Creating the bus without graphics and inserting it with its first connecting line produced a better anchored layout.
 
-## 19. Final conclusion
+## 20. Final conclusion
 
-All nine contributed PowerFactory MCP functions passed automated and live verification.
+All ten contributed PowerFactory MCP functions passed automated and live verification.
 
 The read-only tools correctly reported the active context, network summary, object identities, parameters, friendly component categories, and study cases. `add_component` created all five supported equipment types with verified attributes, types, service states, cubicles, circuit breakers, terminal assignments, and optional graphical insertion. The network completed load-flow and short-circuit calculations with temporary generator and transformer equipment in service. `delete_component` enforced preview and exact confirmation behavior, removed supported equipment, generated connections, circuit breakers, and requested graphical objects, and left no tested residual objects. Final calculations succeeded after cleanup.
 
@@ -806,5 +841,6 @@ Within the documented scope and limitations, the contributed tools are verified 
 | FT-10 | [Single-line diagram synchronization](evidence/FT-10_graphical_synchronization.txt) |
 | FT-11 | [Circuit-breaker creation and cleanup](evidence/FT-11_circuit_breaker_lifecycle.txt) |
 | FT-12 | [Network information summary](evidence/FT-12_network_information.txt) |
+| FT-13 | [Network topology and adjacency](evidence/FT-13_network_topology.txt) |
 
 The supporting files preserve the captured AI client results. Records copied from complete supplied transcripts are marked as verbatim, records assembled from individually supplied raw responses are marked as compiled evidence records.

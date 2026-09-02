@@ -1,28 +1,30 @@
 # PowerMCP PowerFactory Tooling Contribution Report
 
 **Status:** Local contribution, not pushed to Repo
-**Final verified branch:** `feat/powerfactory-network-info`
+**Final verified branch:** `feat/powerfactory-network-topology`
 **Network-information implementation commit:** `ae6e985` (`Add PowerFactory network information summary`)
+**Network-topology implementation commit:** `5a40bd0` (`Add PowerFactory network topology tool`)
 **Verification completed:** 2 September 2026
 **Target system:** DIgSILENT PowerFactory 2026 SP1 with Python 3.10
 
 ## 1. Executive summary
 
-This work extends the PowerFactory integration in PowerMCP with a coherent set of read-only discovery tools and guarded model-editing tools. The contribution enables an AI client to inspect the active PowerFactory context, summarize the selected network, discover objects, read selected parameters, create supported network components with optional single-line diagram synchronization and circuit breakers, and safely preview or perform exact-name deletion.
+This work extends the PowerFactory integration in PowerMCP with a coherent set of read-only discovery tools and guarded model-editing tools. The contribution enables an AI client to inspect the active PowerFactory context, summarize the selected network, extract its bus-and-branch topology, discover objects, read selected parameters, create supported network components with optional single-line diagram synchronization and circuit breakers, and safely preview or perform exact-name deletion.
 
-Nine MCP tools were created:
+Ten MCP tools were created:
 
 1. `get_active_project`
 2. `get_active_study_case`
 3. `get_parameters`
 4. `get_network_info`
-5. `list_objects`
-6. `list_components`
-7. `list_study_cases`
-8. `add_component`
-9. `delete_component`
+5. `get_network_topology`
+6. `list_objects`
+7. `list_components`
+8. `list_study_cases`
+9. `add_component`
+10. `delete_component`
 
-The implementation was verified with 13 automated tests and live calls from the VS Code AI chat client against a running PowerFactory project. Live verification included network-summary comparison, in-service component creation, graphical insertion and deletion, automatic circuit-breaker creation, parameter inspection, load-flow calculations, short-circuit calculations, guarded deletion, hierarchical cleanup, absence checks, and post-cleanup calculations.
+The implementation was verified with 14 automated tests and live calls from the VS Code AI chat client against a running PowerFactory project. Live verification included network-summary and topology comparison, in-service component creation, graphical insertion and deletion, automatic circuit-breaker creation, parameter inspection, load-flow calculations, short-circuit calculations, guarded deletion, hierarchical cleanup, absence checks, and post-cleanup calculations.
 
 The work remains local. It has not been pushed to the online PowerMCP repository.
 
@@ -33,7 +35,7 @@ The comparison baseline was the online `main` branch of `Power-Agent/PowerMCP`, 
 - [PowerFactory/MCP_PowerFactory.py](https://github.com/Power-Agent/PowerMCP/blob/main/PowerFactory/MCP_PowerFactory.py)
 - [PowerFactory/Agent_DIgSILENT.py](https://github.com/Power-Agent/PowerMCP/blob/main/PowerFactory/Agent_DIgSILENT.py)
 
-The online baseline already provided connectivity, configuration, project import, study-case creation, parameter modification, load flow, short-circuit calculation, RMS simulation, custom-case execution, and result-file reading. It did not provide the final nine inspection, discovery, creation, and deletion tools listed above.
+The online baseline already provided connectivity, configuration, project import, study-case creation, parameter modification, load flow, short-circuit calculation, RMS simulation, custom-case execution, and result-file reading. It did not provide the final ten inspection, discovery, topology, creation, and deletion tools listed above.
 
 The supported component scope was intentionally limited to classes available in the test grid:
 
@@ -113,7 +115,16 @@ nominal voltage levels. Live verification compared every equipment count,
 the 121-breaker total, breaker states, and voltage levels with independent
 PowerFactory queries.
 
-### 3.5 `list_objects`
+### 3.5 `get_network_topology`
+
+Returns an undirected bus-and-branch graph for the selected grid. Buses are
+nodes; lines, two-winding transformers, and couplers are edges. Optional
+in-service filtering considers component state, terminal state, cubicle circuit
+breakers, and coupler state. Optional adjacency is returned as a JSON mapping,
+without adding a graph-library dependency. Unresolved connections are reported
+explicitly instead of being silently omitted.
+
+### 3.6 `list_objects`
 
 Lists calculation-relevant objects using a raw PowerFactory query.
 
@@ -125,7 +136,7 @@ list_objects(object_query="*.ElmTerm", max_results=3)
 
 The response includes object name, class, full path, total count, and returned count. This is the expert-level discovery interface for callers that already know PowerFactory class names.
 
-### 3.6 `list_components`
+### 3.7 `list_components`
 
 Lists objects using friendly equipment categories instead of raw class queries.
 
@@ -147,13 +158,13 @@ Supported categories include:
 
 One category can map to multiple PowerFactory classes. Results are deduplicated by full object path and include the out-of-service state when available.
 
-### 3.7 `list_study_cases`
+### 3.8 `list_study_cases`
 
 Lists study cases in the active project's study-case folder and marks the active case with `is_active=true`.
 
 The tool returns a controlled result count and fails clearly if PowerFactory is disconnected or the study-case folder cannot be found.
 
-### 3.8 `add_component`
+### 3.9 `add_component`
 
 Provides one public creation interface for all five supported component types.
 
@@ -195,7 +206,7 @@ Safety and validation include:
 - Post-write attribute verification.
 - Rollback of the new element and its cubicles when setup or verification fails.
 
-### 3.9 `delete_component`
+### 3.10 `delete_component`
 
 Provides guarded deletion for the same five component types.
 
@@ -292,10 +303,10 @@ These commits extend `add_component` and `delete_component`; they do not expose 
 
 ## 6. Automated verification
 
-The final verified branch passed compilation and 13 unit tests:
+The final verified branch passed compilation and 14 unit tests:
 
 ```text
-Ran 13 tests in 0.007s
+Ran 14 tests in 0.008s
 OK
 ```
 
@@ -314,6 +325,7 @@ Tests cover:
 11. Active project, active study case, multi-parameter reading, raw object discovery, and study-case discovery.
 12. K-neighbourhood diagram-layout selection, execution, restoration, and rebuild.
 13. Selected-grid network summary, service state, circuit-breaker state, and voltage levels.
+14. Bus-and-branch topology, breaker-aware service filtering, unresolved connections, coupler state, and symmetric adjacency.
 
 The `[ERROR]` messages printed during unit testing are expected negative-path logs. The tests deliberately trigger invalid inputs and simulated PowerFactory failures, then verify that the operation returns failure and rolls back safely. The unittest outcome remained `OK`.
 
@@ -435,6 +447,15 @@ insertion of an isolated bus can position it far from the existing network.
 Creating the bus without graphics and inserting it together with its first
 connecting line produced a correctly anchored graphical result.
 
+### 7.7 Network topology
+
+Live topology extraction returned 39 bus nodes and 46 resolved edges: 34 lines
+and 12 two-winding transformers. Every edge endpoint existed in the node set,
+all 39 nodes appeared in the optional adjacency mapping, adjacency was
+symmetric, and no unresolved connection was reported. The live model had no
+out-of-service topology edge. No model object was changed and no calculation
+was run during topology verification.
+
 ## 8. Credibility assessment
 
 ### Read-only tools
@@ -541,11 +562,11 @@ This report is intended to be added as:
 The implementation and verification are complete. If the contribution is prepared for upstream review, the remaining non-code work is:
 
 1. Review this report.
-2. Add concise user documentation for the nine tools to the repository README or PowerFactory documentation.
+2. Add concise user documentation for the ten tools to the repository README or PowerFactory documentation.
 3. Rebase the local integration branch on the latest online `main` branch.
-4. Re-run the 13 tests and one live smoke test after rebasing.
+4. Re-run the 14 tests and one live smoke test after rebasing.
 5. Push only when the contribution is intentionally ready for review.
 
 ## 13. Conclusion
 
-AI clients can now establish their active context, summarize the selected network, discover available objects, inspect selected attributes, safely create supported network equipment, execute calculations against the modified model, and remove temporary equipment through a guarded workflow.
+AI clients can now establish their active context, summarize and graph the selected network, discover available objects, inspect selected attributes, safely create supported network equipment, execute calculations against the modified model, and remove temporary equipment through a guarded workflow.

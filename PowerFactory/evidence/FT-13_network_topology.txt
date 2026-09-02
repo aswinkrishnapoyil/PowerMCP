@@ -1,0 +1,72 @@
+Evidence ID: FT-13
+Title: Network topology and adjacency verification
+Date: 2 September 2026
+Classification: Compiled evidence record
+
+Preconditions:
+
+- PowerFactory project `test` active.
+- Study case `Case 1` active.
+- Grid `Grid` selected.
+- No network modification or calculation performed.
+
+Call 1 - In-service topology
+
+Exact input:
+
+{
+  "grid_name": "Grid",
+  "in_service_only": true,
+  "include_adjacency": false
+}
+
+Observed result:
+
+- success: true
+- node_count: 39
+- edge_count: 46
+- unresolved_edges: 0
+- edge composition: 34 lines and 12 two-winding transformers
+
+Call 2 - Complete topology with adjacency
+
+Exact input:
+
+{
+  "grid_name": "Grid",
+  "in_service_only": false,
+  "include_adjacency": true
+}
+
+Observed verification:
+
+- success: true
+- node_count: 39
+- returned nodes: 39
+- edge_count: 46
+- returned edges: 46
+- line edges: 34
+- transformer edges: 12
+- edges with in_service=false: 0
+- unresolved_edges: 0
+- adjacency keys: 39
+- edges with missing node endpoints: 0
+- asymmetric adjacency relationships: 0
+
+Representative records:
+
+- Node: Bus 08, nominal voltage 345.0 kV, out_of_service=false
+- Line: Line 04 - 05, Bus 04 to Bus 05
+- Transformer: Trf 06 - 31, Bus 06 to Bus 31
+
+Conclusion:
+
+The topology tool returned one node per bus and one undirected edge per
+resolved line or two-winding transformer. Counts matched the independently
+verified network summary, every edge endpoint existed, adjacency covered all
+nodes and was symmetric, and no unresolved connection was reported. The live
+network contained no out-of-service topology edge. Automated testing separately
+verified filtering for an open cubicle circuit breaker, an open coupler, an
+out-of-service bus, and an unresolved endpoint.
+
+Status: PASS
