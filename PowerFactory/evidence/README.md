@@ -22,3 +22,4 @@ The PowerFactory account and project paths are retained in verbatim MCP output f
 | FT-09 | `FT-09_cleanup_calculations.txt` | Verbatim transcript |
 | FT-10 | `FT-10_graphical_synchronization.txt` | Compiled evidence record |
 | FT-11 | `FT-11_circuit_breaker_lifecycle.txt` | Compiled evidence record |
+| FT-12 | `FT-12_network_information.txt` | Compiled evidence record |

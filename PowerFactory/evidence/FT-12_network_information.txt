@@ -1,0 +1,99 @@
+Evidence ID: FT-12
+Title: PowerFactory network information summary
+Date: 2 September 2026
+Classification: Compiled evidence record
+
+Objective:
+
+Verify that get_network_info returns the active PowerFactory context and an
+accurate read-only summary of the selected Grid network.
+
+Input:
+
+{
+  "grid_name": "Grid"
+}
+
+Decoded response:
+
+{
+  "success": true,
+  "project": {
+    "name": "test",
+    "full_name": "\\ic84yhos.IntUser\\test.IntPrj"
+  },
+  "study_case": {
+    "name": "Case 1",
+    "full_name": "\\ic84yhos.IntUser\\test.IntPrj\\Study Cases.IntPrjfolder\\Case 1.IntCase"
+  },
+  "grid": {
+    "name": "Grid",
+    "full_name": "\\ic84yhos.IntUser\\test.IntPrj\\Network Model.IntPrjfolder\\Network Data.IntPrjfolder\\Grid.ElmNet"
+  },
+  "component_counts": {
+    "buses": 39,
+    "lines": 34,
+    "transformers": 12,
+    "loads": 19,
+    "generators": 10,
+    "storage": 0,
+    "external_grids": 0,
+    "switches": 0,
+    "circuit_breakers": 121
+  },
+  "out_of_service_counts": {
+    "buses": 0,
+    "lines": 0,
+    "transformers": 0,
+    "loads": 0,
+    "generators": 0,
+    "storage": 0,
+    "external_grids": 0,
+    "switches": 0
+  },
+  "circuit_breaker_states": {
+    "closed": 121,
+    "open": 0,
+    "unknown": 0
+  },
+  "voltage_levels_kv": [16.5, 138.0, 230.0, 345.0]
+}
+
+Independent component-count verification:
+
+| Category | Summary | Independent query | Result |
+|---|---:|---:|---|
+| Buses | 39 | 39 | MATCH |
+| Lines | 34 | 34 | MATCH |
+| Transformers | 12 | 12 | MATCH |
+| Loads | 19 | 19 | MATCH |
+| Generators | 10 | 10 | MATCH |
+| Storage | 0 | 0 | MATCH |
+| External grids | 0 | 0 | MATCH |
+| Switches | 0 | 0 | MATCH |
+| Circuit breakers | 121 | 121 | MATCH |
+
+The equipment counts were independently obtained with list_components for
+each friendly category. The circuit-breaker count was independently obtained
+with list_objects using object_query="*.StaSwitch".
+
+Independent attribute verification:
+
+- get_parameters("*.ElmTerm", ["uknom", "outserv"]) returned 39 buses.
+- Sorted unique uknom values were [16.5, 138.0, 230.0, 345.0].
+- Buses with outserv=1: 0.
+- get_parameters("*.StaSwitch", ["on_off"]) returned 121 switches.
+- Circuit breakers with on_off=1: 121.
+- Circuit breakers with on_off=0: 0.
+
+All independently calculated values matched get_network_info.
+
+Operational behavior:
+
+- The existing study case Case 1 was activated before the test.
+- Every get_network_info, list_components, list_objects, and get_parameters
+  response returned success=true.
+- No network object was created, modified, or deleted.
+- No load-flow or short-circuit calculation was run.
+
+Result: PASS

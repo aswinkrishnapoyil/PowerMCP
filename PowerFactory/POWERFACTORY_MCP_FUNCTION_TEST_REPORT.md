@@ -23,18 +23,19 @@ Related implementation report: [PowerMCP PowerFactory Tooling Contribution Repor
 
 ## 1. Test objective
 
-The objective was to verify that all eight locally contributed MCP tools behave correctly against a live PowerFactory project and that the model remains calculation-ready after temporary modifications and cleanup. The extended verification also covered single-line diagram synchronization and automatic circuit-breaker creation inside generated cubicles.
+The objective was to verify that all nine locally contributed MCP tools behave correctly against a live PowerFactory project and that the model remains calculation-ready after temporary modifications and cleanup. The extended verification also covered single-line diagram synchronization and automatic circuit-breaker creation inside generated cubicles.
 
 The contributed tools under test were:
 
 1. `get_active_project`
 2. `get_active_study_case`
 3. `get_parameters`
-4. `list_objects`
-5. `list_components`
-6. `list_study_cases`
-7. `add_component`
-8. `delete_component`
+4. `get_network_info`
+5. `list_objects`
+6. `list_components`
+7. `list_study_cases`
+8. `add_component`
+9. `delete_component`
 
 Existing PowerMCP tools-`ping`, `create_study_case`, `run_loadflow`, and `run_short_circuit`-were used as supporting verification operations. They are not claimed as contributions in this report.
 
@@ -44,7 +45,7 @@ Verification combined three evidence levels:
 
 1. **Compilation:** Python syntax validation for implementation and test files.
 2. **Automated unit tests:** Positive, validation, failure, and rollback paths using controlled fake PowerFactory objects.
-3. **Live PowerFactory tests:** AI-driven MCP calls against the `test` project, including object discovery, parameter inspection, in-service equipment creation, graphical insertion and deletion, circuit-breaker inspection, load flow, short circuit, guarded deletion, absence checks, and post-cleanup calculations.
+3. **Live PowerFactory tests:** AI-driven MCP calls against the `test` project, including network-summary verification, object discovery, parameter inspection, in-service equipment creation, graphical insertion and deletion, circuit-breaker inspection, load flow, short circuit, guarded deletion, absence checks, and post-cleanup calculations.
 
 ### Acceptance criteria
 
@@ -52,6 +53,7 @@ A test was considered successful when:
 
 - The MCP response contained `success=true` where applicable.
 - Returned project, study-case, object, and attribute data matched the live PowerFactory model.
+- Network-summary counts, voltage levels, and circuit-breaker states matched independent read-only queries.
 - Created equipment retained its requested class, attributes, type, terminal connections, and service state.
 - Load-flow and short-circuit calculations completed successfully with temporary equipment in service.
 - Confirmed deletion removed the target and its associated cubicles.
@@ -78,10 +80,11 @@ A test was considered successful when:
 | FT-09 | Absence checks and post-cleanup calculations | PASS |
 | FT-10 | Single-line diagram insertion, deletion, and refresh | PASS WITH DOCUMENTED LIMITATION |
 | FT-11 | Automatic circuit-breaker creation and cleanup | PASS |
+| FT-12 | Read-only network information summary | PASS |
 
 **Overall outcome: PASS**
 
-All eight contributed functions and the two extended component-management behaviors were verified. No temporary test component or generated test switchgear remained in the PowerFactory model at the end of testing.
+All nine contributed functions and the two extended component-management behaviors were verified. No temporary test component or generated test switchgear remained in the PowerFactory model at the end of testing.
 
 ## 4. Function-to-evidence traceability
 
@@ -90,6 +93,7 @@ All eight contributed functions and the two extended component-management behavi
 | `get_active_project` | `test_state_and_discovery_tools` | FT-01 | [FT-01](evidence/FT-01_active_context.txt) | VERIFIED |
 | `get_active_study_case` | `test_state_and_discovery_tools` | FT-01 | [FT-01](evidence/FT-01_active_context.txt) | VERIFIED |
 | `get_parameters` | `test_state_and_discovery_tools` | FT-02, FT-06, FT-07 | [FT-02](evidence/FT-02_parameter_inspection.txt), [FT-06](evidence/FT-06_generator_verification.txt), [FT-07](evidence/FT-07_transformer_verification.txt) | VERIFIED |
+| `get_network_info` | `test_get_network_info` | FT-12 | [FT-12](evidence/FT-12_network_information.txt) | VERIFIED |
 | `list_objects` | `test_state_and_discovery_tools` | FT-03, FT-09 | [FT-03](evidence/FT-03_component_discovery.txt), [FT-09](evidence/FT-09_cleanup_calculations.txt) | VERIFIED |
 | `list_components` | `test_list_components` | FT-03 | [FT-03](evidence/FT-03_component_discovery.txt) | VERIFIED |
 | `list_study_cases` | `test_state_and_discovery_tools` | FT-04 | [FT-04](evidence/FT-04_study_case_discovery.txt) | VERIFIED |
@@ -115,7 +119,7 @@ All eight contributed functions and the two extended component-management behavi
 ### Result
 
 ```text
-Ran 12 tests in 0.006s
+Ran 13 tests in 0.007s
 
 OK
 ```
@@ -134,6 +138,7 @@ OK
 | `test_delete_component_requires_confirmation_and_cleans_connections` | Preview, exact confirmation, bus protection, cubicle cleanup, absence verification | PASS |
 | `test_delete_component_updates_active_diagram` | Graphical-object deletion and application rebuild | PASS |
 | `test_update_active_diagram_uses_k_neighbourhood` | K-neighbourhood selection, execution, restoration, and rebuild | PASS |
+| `test_get_network_info` | Selected-grid context, equipment counts, service state, breaker state, and voltage levels | PASS |
 | `test_list_components` | Friendly category mapping, result limits, unsupported categories | PASS |
 | `test_state_and_discovery_tools` | Active state, parameter reads, raw object listing, study-case listing | PASS |
 
@@ -733,7 +738,39 @@ Automatic circuit-breaker creation, retained breaker attributes, component-state
 
 **Supporting evidence:** [FT-11 circuit-breaker lifecycle](evidence/FT-11_circuit_breaker_lifecycle.txt)
 
-## 17. Deviations and observations
+## 17. Live test FT-12 - Network information summary
+
+### Objective
+
+Verify that `get_network_info` returns an accurate read-only summary of the
+selected active PowerFactory grid.
+
+### Observed result
+
+The tool selected project `test`, study case `Case 1`, and network `Grid`.
+It returned 39 buses, 34 lines, 12 transformers, 19 loads, 10 generators,
+121 circuit breakers, and the voltage levels 16.5, 138, 230, and 345 kV.
+
+Independent `list_components` calls matched every friendly component count.
+`list_objects("*.StaSwitch")` independently returned 121 circuit breakers.
+Independent parameter reads confirmed that all 39 buses were in service,
+all 121 circuit breakers were closed, and the reported voltage levels were
+complete and correctly sorted.
+
+No network object was created, modified, or deleted, and no calculation was
+run during this verification.
+
+### Conclusion
+
+The selected-grid context, component totals, service-state summary,
+circuit-breaker states, and voltage levels all matched independent read-only
+PowerFactory queries.
+
+**Status: PASS**
+
+**Supporting evidence:** [FT-12 network information](evidence/FT-12_network_information.txt)
+
+## 18. Deviations and observations
 
 1. The VS Code AI client initially required deferred tool discovery before all read-only tools became visible. Once resolved, every requested tool executed successfully.
 2. FastMCP responses wrap the tool's JSON string in an outer `result` field. This report presents decoded inner JSON for readability while preserving the original meaning.
@@ -744,11 +781,11 @@ Automatic circuit-breaker creation, retained breaker attributes, component-state
 7. Relay, CT, and VT creation is outside the present scope. The generated cubicles currently contain a circuit breaker only.
 8. Direct graphical insertion of an isolated bus can place it far from the existing network and expand the fitted viewport. Creating the bus without graphics and inserting it with its first connecting line produced a better anchored layout.
 
-## 18. Final conclusion
+## 19. Final conclusion
 
-All eight contributed PowerFactory MCP functions passed automated and live verification.
+All nine contributed PowerFactory MCP functions passed automated and live verification.
 
-The read-only tools correctly reported the active context, object identities, parameters, friendly component categories, and study cases. `add_component` created all five supported equipment types with verified attributes, types, service states, cubicles, circuit breakers, terminal assignments, and optional graphical insertion. The network completed load-flow and short-circuit calculations with temporary generator and transformer equipment in service. `delete_component` enforced preview and exact confirmation behavior, removed supported equipment, generated connections, circuit breakers, and requested graphical objects, and left no tested residual objects. Final calculations succeeded after cleanup.
+The read-only tools correctly reported the active context, network summary, object identities, parameters, friendly component categories, and study cases. `add_component` created all five supported equipment types with verified attributes, types, service states, cubicles, circuit breakers, terminal assignments, and optional graphical insertion. The network completed load-flow and short-circuit calculations with temporary generator and transformer equipment in service. `delete_component` enforced preview and exact confirmation behavior, removed supported equipment, generated connections, circuit breakers, and requested graphical objects, and left no tested residual objects. Final calculations succeeded after cleanup.
 
 Within the documented scope and limitations, the contributed tools are verified for controlled local PowerMCP use.
 
@@ -768,5 +805,6 @@ Within the documented scope and limitations, the contributed tools are verified 
 | FT-09 | [Absence checks and cleanup calculations](evidence/FT-09_cleanup_calculations.txt) |
 | FT-10 | [Single-line diagram synchronization](evidence/FT-10_graphical_synchronization.txt) |
 | FT-11 | [Circuit-breaker creation and cleanup](evidence/FT-11_circuit_breaker_lifecycle.txt) |
+| FT-12 | [Network information summary](evidence/FT-12_network_information.txt) |
 
 The supporting files preserve the captured AI client results. Records copied from complete supplied transcripts are marked as verbatim, records assembled from individually supplied raw responses are marked as compiled evidence records.
