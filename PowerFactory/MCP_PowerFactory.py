@@ -68,6 +68,7 @@ _repo_root_added = _repo_root not in sys.path
 if _repo_root_added:
     sys.path.insert(0, _repo_root)
 try:
+    from powermcp.errors import tool_error, tool_success
     from powermcp.sandbox import (
         checked_path,
         checked_read_tree,
@@ -135,16 +136,27 @@ def _pf(fn, *args, **kwargs):
     return _pf_executor.submit(fn, *args, **kwargs).result()
 
 
+def _reported(ok: bool, message: str, **fields: Any) -> dict[str, Any]:
+    """Map an agent result onto the shared tool result shape."""
+    if ok:
+        return tool_success(message=message, **fields)
+    return tool_error(message, **fields)
+
+
 def _agent_result(method_name: str, *args, structured: bool = False) -> str:
+    """Call an agent method on the PowerFactory thread and serialize it."""
     _, DIgSILENTAgent = _load_modules()
     result = _pf(
         getattr(DIgSILENTAgent, method_name),
         *args,
     )
     if structured:
-        return json.dumps(result)
+        fields = dict(result)
+        ok = bool(fields.pop("success", False))
+        message = fields.pop("message", "")
+        return json.dumps(_reported(ok, message, **fields))
     ok, message = result
-    return json.dumps({"success": ok, "message": message})
+    return json.dumps(_reported(ok, message))
 
 
 def _load_modules():
@@ -158,17 +170,11 @@ def _read_only_result(agent, operation):
     try:
         app = agent._get_application(open_digsilent=False)
     except Exception as exc:
-        return {
-            "success": False,
-            "message": f"PowerFactory connection failed: {exc}",
-        }
+        return tool_error(f"PowerFactory connection failed: {exc}")
     try:
         return operation(app)
     except Exception as exc:
-        return {
-            "success": False,
-            "message": f"PowerFactory read failed: {exc}",
-        }
+        return tool_error(f"PowerFactory read failed: {exc}")
 
 
 def _to_json(obj: Any) -> str:
@@ -223,13 +229,13 @@ def close_digsilent() -> str:
     Returns
     -------
     str
-        JSON string with success flag and message.
+        JSON string with a "status" of "success" or "error", and a message.
     """
     _, DIgSILENTAgent = _load_modules()
 
     def _impl():
         DIgSILENTAgent.close()
-        return {"success": True, "message": "DIgSILENT API closed"}
+        return tool_success(message="DIgSILENT API closed")
 
     return _to_json(_pf(_impl))
 
@@ -249,15 +255,11 @@ def get_active_project() -> str:
     def _impl(app):
         project = app.GetActiveProject()
         if project is None:
-            return {
-                "success": False,
-                "message": "No PowerFactory project is active",
-            }
-        return {
-            "success": True,
-            "name": project.GetAttribute("loc_name"),
-            "full_name": project.GetFullName(),
-        }
+            return tool_error("No PowerFactory project is active")
+        return tool_success(
+            name=project.GetAttribute("loc_name"),
+            full_name=project.GetFullName(),
+        )
 
     return _to_json(_pf(_read_only_result, DIgSILENTAgent, _impl))
 
@@ -269,15 +271,11 @@ def get_active_study_case() -> str:
     def _impl(app):
         study_case = app.GetActiveStudyCase()
         if study_case is None:
-            return {
-                "success": False,
-                "message": "No PowerFactory study case is active",
-            }
-        return {
-            "success": True,
-            "name": study_case.GetAttribute("loc_name"),
-            "full_name": study_case.GetFullName(),
-        }
+            return tool_error("No PowerFactory study case is active")
+        return tool_success(
+            name=study_case.GetAttribute("loc_name"),
+            full_name=study_case.GetFullName(),
+        )
 
     return _to_json(_pf(_read_only_result, DIgSILENTAgent, _impl))
 
@@ -295,17 +293,11 @@ def get_parameters(
             dict.fromkeys(name.strip() for name in variables if name.strip())
         )
         if not variable_names:
-            return {
-                "success": False,
-                "message": "At least one variable is required",
-            }
+            return tool_error("At least one variable is required")
 
         objects = app.GetCalcRelevantObjects(object_query) or []
         if not objects:
-            return {
-                "success": False,
-                "message": f"No objects found for query: {object_query}",
-            }
+            return tool_error(f"No objects found for query: {object_query}")
 
         limit = max(1, min(int(max_results), 1000))
         results = []
@@ -337,14 +329,13 @@ def get_parameters(
 
             results.append(item)
 
-        return {
-            "success": True,
-            "query": object_query,
-            "variables": variable_names,
-            "total_count": len(objects),
-            "returned_count": len(results),
-            "results": results,
-        }
+        return tool_success(
+            query=object_query,
+            variables=variable_names,
+            total_count=len(objects),
+            returned_count=len(results),
+            results=results,
+        )
 
     return _to_json(_pf(_read_only_result, DIgSILENTAgent, _impl))
 
@@ -401,13 +392,12 @@ def list_objects(object_query: str = "*.ElmTerm", max_results: int = 100) -> str
             }
             for obj in objects[:limit]
         ]
-        return {
-            "success": True,
-            "query": object_query,
-            "total_count": len(objects),
-            "returned_count": len(results),
-            "results": results,
-        }
+        return tool_success(
+            query=object_query,
+            total_count=len(objects),
+            returned_count=len(results),
+            results=results,
+        )
 
     return _to_json(_pf(_read_only_result, DIgSILENTAgent, _impl))
 
@@ -430,14 +420,10 @@ def list_components(
         queries = _COMPONENT_QUERIES.get(category)
 
     if queries is None:
-        return _to_json({
-            "success": False,
-            "message": f"Unsupported component type: {component_type}",
-            "supported_component_types": [
-                "all",
-                *_COMPONENT_QUERIES,
-            ],
-        })
+        return _to_json(tool_error(
+            f"Unsupported component type: {component_type}",
+            supported_component_types=["all", *_COMPONENT_QUERIES],
+        ))
 
     _, DIgSILENTAgent = _load_modules()
 
@@ -469,14 +455,13 @@ def list_components(
                     "out_of_service": out_of_service,
             })
 
-        return {
-            "success": True,
-            "component_type": category,
-            "queries": list(queries),
-            "total_count": len(components),
-            "returned_count": len(results),
-            "results": results,
-        }
+        return tool_success(
+            component_type=category,
+            queries=list(queries),
+            total_count=len(components),
+            returned_count=len(results),
+            results=results,
+        )
 
     return _to_json(_pf(_read_only_result, DIgSILENTAgent, _impl))
 
@@ -488,10 +473,7 @@ def list_study_cases(max_results: int = 100) -> str:
     def _impl(app):
         folder = app.GetProjectFolder("study")
         if folder is None:
-            return {
-                "success": False,
-                "message": "Study-case folder was not found",
-            }
+            return tool_error("Study-case folder was not found")
         study_cases = folder.GetContents("*.IntCase", 1) or []
         active_case = app.GetActiveStudyCase()
         active_full_name = active_case.GetFullName() if active_case else None
@@ -506,12 +488,11 @@ def list_study_cases(max_results: int = 100) -> str:
                 "full_name": full_name,
                 "is_active": full_name == active_full_name,
             })
-        return {
-            "success": True,
-            "total_count": len(study_cases),
-            "returned_count": len(results),
-            "results": results,
-        }
+        return tool_success(
+            total_count=len(study_cases),
+            returned_count=len(results),
+            results=results,
+        )
 
     return _to_json(_pf(_read_only_result, DIgSILENTAgent, _impl))
 
@@ -537,10 +518,10 @@ def import_project(
     Returns
     -------
     str
-        JSON string with success flag and message.
+        JSON string with a "status" of "success" or "error", and a message.
     """
     if not file_path:
-        return json.dumps({"success": False, "message": "file_path is required"})
+        return json.dumps(tool_error("file_path is required"))
     file_path = checked_path(file_path, purpose="file_path")
     return _agent_result("import_project", file_path, open_digsilent)
 
@@ -574,7 +555,7 @@ def create_study_case(
     Returns
     -------
     str
-        JSON string with success flag and message.
+        JSON string with a "status" of "success" or "error", and a message.
     """
     SimulationConfig, _ = _load_modules()
     path = checked_path(cfg_path, purpose="cfg_path") if cfg_path else _default_cfg_path()
@@ -614,7 +595,7 @@ def modify_parameter(
     Returns
     -------
     str
-        JSON string with success flag and message.
+        JSON string with a "status" of "success" or "error", and a message.
     """
     return _agent_result(
         "modify_parameter",
@@ -653,7 +634,7 @@ def add_component(
     Set update_graphics to true to insert missing network elements into
     the currently active single-line diagram using PowerFactory's Diagram
     Layout Tool. If insertion fails, the network component remains created,
-    but the tool returns success=false with the graphical error.
+    but the tool reports "status": "error" with the graphical error.
     """
     return _agent_result(
         "add_component",
@@ -684,7 +665,7 @@ def delete_component(
 
     Set update_graphics to true for confirmed deletion from every single-line
     diagram in the active project. Preview calls do not modify any diagram.
-    A cleanup failure can return success=false with deleted=true when the
+    A cleanup failure can return status=error with deleted=true when the
     network component is gone but graphical or cubicle cleanup is incomplete.
     """
     return _agent_result(
@@ -725,7 +706,7 @@ def run_loadflow(
     Returns
     -------
     str
-        JSON string with success flag and message.
+        JSON string with a "status" of "success" or "error", and a message.
     """
     SimulationConfig, DIgSILENTAgent = _load_modules()
 
@@ -742,10 +723,7 @@ def run_loadflow(
             run_label = getattr(cfg, "run_label", run_label) or run_label
         except Exception as e:
             return json.dumps(
-                {
-                    "success": False,
-                    "message": f"Could not read config for CSV export: {e}",
-                }
+                tool_error(f"Could not read config for CSV export: {e}")
             )
 
     return _agent_result(
@@ -770,7 +748,7 @@ def run_short_circuit(open_digsilent: bool = True) -> str:
     Returns
     -------
     str
-        JSON string with success flag and message.
+        JSON string with a "status" of "success" or "error", and a message.
     """
     return _agent_result("short_circuit", open_digsilent)
 
@@ -802,7 +780,7 @@ def run_simulation(
     Returns
     -------
     str
-        JSON string with success flag, csv_path, optional pfd_path,
+        JSON string with a "status", csv_path, optional pfd_path,
         and per-step status.
     """
     SimulationConfig, DIgSILENTAgent = _load_modules()
@@ -925,7 +903,7 @@ def read_results_csv(csv_path: str = "", max_rows: int = 2000, as_path: bool = F
     New parameters
     --------------
     as_path : bool, optional
-        If True, return a small JSON object containing the absolute file
+        If True, return a small JSON object carrying "status" and the absolute file
         path instead of the file contents. Use this to avoid hitting MCP
         transport size limits when passing the CSV to external LLMs.
     max_bytes : int, optional
@@ -945,7 +923,8 @@ def read_results_csv(csv_path: str = "", max_rows: int = 2000, as_path: bool = F
     -------
     str
         CSV text (header + up to max_rows rows) followed by metadata lines
-        with file path, total rows, and truncation flag.
+        with file path, total rows, and truncation flag. A failure instead
+        returns a JSON string with "status": "error" and a message.
     """
     if csv_path:
         target = checked_path(csv_path, purpose="csv_path")
@@ -964,17 +943,19 @@ def read_results_csv(csv_path: str = "", max_rows: int = 2000, as_path: bool = F
                     candidates.append((os.path.getmtime(full), full))
 
         if not candidates:
-            return json.dumps({"error": f"No *_RMS.csv files found under {base_dir}"})
+            return json.dumps(
+                tool_error(f"No *_RMS.csv files found under {base_dir}")
+            )
         candidates.sort(reverse=True)
         target = candidates[0][1]
 
     target = checked_path(target, purpose="results CSV path")
 
     if not os.path.exists(target):
-        return json.dumps({"error": f"File not found: {target}"})
+        return json.dumps(tool_error(f"File not found: {target}"))
 
     if as_path:
-        return json.dumps({"file_path": target})
+        return json.dumps(tool_success(file_path=target))
 
     with open(target, "r", encoding="utf-8", errors="replace") as fh:
         lines = fh.readlines()
