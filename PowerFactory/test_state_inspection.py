@@ -127,7 +127,7 @@ class StateInspectionTest(unittest.TestCase):
             )
 
         self.assertEqual(result, {
-            "success": True,
+            "status": "success",
             "message": "Short-circuit calculation OK",
         })
 
@@ -155,7 +155,7 @@ class StateInspectionTest(unittest.TestCase):
             ["references"],
         ))
 
-        self.assertTrue(result["success"])
+        self.assertEqual(result["status"], "success")
         self.assertEqual(
             result["results"][0]["values"]["references"],
             [str(reference)],
@@ -199,7 +199,9 @@ class StateInspectionTest(unittest.TestCase):
                 json.loads(mcp_module.list_study_cases()),
             ]
 
-        self.assertTrue(all(result["success"] for result in results))
+        self.assertTrue(
+            all(result["status"] == "success" for result in results)
+        )
         self.assertEqual(get_application.call_count, 6)
         for call in get_application.call_args_list:
             self.assertFalse(call.kwargs["open_digsilent"])
@@ -211,7 +213,7 @@ class StateInspectionTest(unittest.TestCase):
         ):
             failure = json.loads(mcp_module.get_active_project())
 
-        self.assertFalse(failure["success"])
+        self.assertEqual(failure["status"], "error")
         self.assertIn("PowerFactory is unavailable", failure["message"])
 
         with (
@@ -224,11 +226,11 @@ class StateInspectionTest(unittest.TestCase):
         ):
             failure = json.loads(mcp_module.get_active_project())
 
-        self.assertFalse(failure["success"])
+        self.assertEqual(failure["status"], "error")
         self.assertIn("project lookup failed", failure["message"])
 
     def test_delete_component_preserves_partial_deletion_result(self):
-        expected = {
+        agent_result = {
             "success": False,
             "deleted": True,
             "graphics": {
@@ -240,10 +242,16 @@ class StateInspectionTest(unittest.TestCase):
             },
             "message": "Component deleted, but graphical objects remain",
         }
+        expected = {
+            "status": "error",
+            "message": "Component deleted, but graphical objects remain",
+            "deleted": True,
+            "graphics": agent_result["graphics"],
+        }
 
         with (
             patch.object(FakeAgent, "delete_component", create=True),
-            patch.object(mcp_module, "_pf", return_value=expected),
+            patch.object(mcp_module, "_pf", return_value=agent_result),
         ):
             result = json.loads(mcp_module.delete_component(
                 "load",

@@ -60,7 +60,18 @@ def test_a_refused_deletion_keeps_its_own_key_on_the_error_branch(server, monkey
     class Agent:
         @staticmethod
         def delete_component(*args):
-            return False, "Component not found: Bus 99"
+            return {
+                "success": False,
+                "deleted": False,
+                "graphics": {
+                    "requested": False,
+                    "matched": 0,
+                    "deleted": 0,
+                    "remaining": [],
+                    "refresh": "not_requested",
+                },
+                "message": "Component not found: Bus 99",
+            }
 
     monkeypatch.setattr(server, "_load_modules", lambda: (None, Agent))
     monkeypatch.setattr(server, "_pf", lambda function, *args: function(*args))
@@ -68,7 +79,42 @@ def test_a_refused_deletion_keeps_its_own_key_on_the_error_branch(server, monkey
     result = json.loads(server.delete_component("bus", "Bus 99", confirmation="yes"))
     assert result["status"] == "error"
     assert result["deleted"] is False
+    assert result["graphics"]["refresh"] == "not_requested"
+    assert "success" not in result
     assert "Bus 99" in result["message"]
+
+
+def test_a_partial_deletion_is_an_error_without_losing_cleanup_details(
+    server, monkeypatch
+):
+    graphics = {
+        "requested": True,
+        "matched": 1,
+        "deleted": 0,
+        "remaining": [r"\user\Grid\Load Symbol.IntGrf"],
+        "refresh": "rebuilt",
+    }
+
+    class Agent:
+        @staticmethod
+        def delete_component(*args):
+            return {
+                "success": False,
+                "deleted": True,
+                "graphics": graphics,
+                "message": "Component deleted, but graphical objects remain",
+            }
+
+    monkeypatch.setattr(server, "_load_modules", lambda: (None, Agent))
+    monkeypatch.setattr(server, "_pf", lambda function, *args: function(*args))
+
+    result = json.loads(server.delete_component("load", "Load 1", confirmation="yes"))
+    assert result == {
+        "status": "error",
+        "message": "Component deleted, but graphical objects remain",
+        "deleted": True,
+        "graphics": graphics,
+    }
 
 
 def test_a_missing_required_argument_is_reported_not_raised(server):

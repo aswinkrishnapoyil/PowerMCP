@@ -2263,7 +2263,10 @@ if __name__ == "__main__":
         if isinstance(result, dict):
             status = "✅" if result["ok"] else "❌"
             print(f"  {status}  {step:<20} {result['msg']}")
-    print(f"\n  Overall success: {'✅ YES' if report['success'] else '❌ NO'}")
+    print(
+        f"\n  Overall success: "
+        f"{'✅ YES' if report['status'] == 'success' else '❌ NO'}"
+    )
     if report["csv_path"]:
         print(f"  CSV output:      {report['csv_path']}")
     print("═" * 60)

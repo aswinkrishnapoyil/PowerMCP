@@ -289,8 +289,8 @@ saved revision. Inspect the Study before retrying. See
 
 ### Tool results
 
-Every tool in this repository reports the same shape, so one client handles all
-of them:
+The converted GenX, PowerFactory, PLEXOSDB and OpenDSS servers report the same
+shape, so one client handles all of them:
 
 ```json
 {"status": "success", "...": "the keys that tool documents"}
@@ -304,6 +304,11 @@ every server uses, `tool_success`, `tool_error` and `run_tool`. A tool that
 documents a key on both branches carries it on both. A few tools return
 something other than a JSON object on success, such as raw CSV text; they still
 report a failure through the shape above.
+
+This is a breaking normalization for those servers: clients must replace checks
+for the legacy `success`, `ok` and OpenDSS `error` keys with checks of `status`.
+Other servers retain their documented result formats; for example, HOPE still
+uses its existing `ok` result key.
 
 ### Running from a clone (without installing)
 

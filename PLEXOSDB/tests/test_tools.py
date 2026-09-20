@@ -61,6 +61,11 @@ def _load_main_module():
     mod = importlib.util.module_from_spec(spec)
     sys.modules["plexosdb_main_under_test"] = mod
     spec.loader.exec_module(mod)
+
+    def pass_through_path(path, **_):
+        return path
+
+    mod.checked_path = pass_through_path
     return mod
 
 
@@ -126,7 +131,7 @@ class TestTranslateToSienna(unittest.TestCase):
             fake_source_system, r2x_plexos_to_sienna.PlexosToSiennaConfig.return_value
         )
         fake_export_ctx.run.assert_called_once()
-        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "success")
         self.assertEqual(result["output_path"], "/tmp/out/system.json")
         self.assertEqual(result["component_types"], {"Bus": 2, "Generator": 1})
 
