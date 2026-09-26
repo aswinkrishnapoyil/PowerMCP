@@ -1125,7 +1125,14 @@ def add_contingency_result_variables(
     """Add variables to the configured AC or DC contingency result file.
 
     This updates the existing ``ElmRes`` recording selection but does not run
-    the contingency analysis. Run it again to populate the added variables.
+    the contingency analysis. Each entry in ``results`` lists the variables
+    ``added`` by this call and those ``already_recorded``; ``added_variables``
+    and ``already_recorded_variables`` total them. Rerun the analysis only
+    when ``added_variables`` is non-zero -- a repeat call adds nothing.
+
+    Every recorded ``m:u`` / ``c:loading`` column is scanned by
+    ``get_contingency_summary``, which refuses files above 20,000 cells
+    (rows x columns), so recording those for many objects can disable it.
     """
     method = str(calculation_method or "").strip().lower()
     if method not in {"ac", "dc"}:
@@ -1200,32 +1207,52 @@ def add_contingency_result_variables(
         configured = []
         errors = []
         for object_index, obj in enumerate(objects[:object_limit]):
+            # Identify the object before writing to it. Anything raised here
+            # or below stays scoped to this object, so the record of columns
+            # already added survives instead of the whole call surfacing as a
+            # failed read.
+            try:
+                summary = _object_summary(obj)
+            except Exception as exc:
+                errors.append({
+                    "object_index": object_index,
+                    "message": f"Could not identify object: {exc}",
+                })
+                continue
             added = []
+            already_recorded = []
             for variable in variable_names:
                 if (object_index, variable) in existing:
-                    added.append(variable)
+                    already_recorded.append(variable)
                     continue
                 try:
                     code = result_file.AddVariable(obj, variable)
                 except Exception as exc:
                     errors.append({
-                        "object": _object_summary(obj),
+                        "object_index": object_index,
+                        "object": summary,
                         "variable": variable,
                         "message": str(exc),
                     })
                     continue
                 if code not in (0, None):
                     errors.append({
-                        "object": _object_summary(obj),
+                        "object_index": object_index,
+                        "object": summary,
                         "variable": variable,
                         "code": code,
                     })
                     continue
                 added.append(variable)
-            if added:
+            if added or already_recorded:
                 configured.append({
-                    "object": _object_summary(obj),
-                    "variables": added,
+                    "object": summary,
+                    "variables": [
+                        variable for variable in variable_names
+                        if variable in added or variable in already_recorded
+                    ],
+                    "added": added,
+                    "already_recorded": already_recorded,
                 })
 
         response = {
@@ -1239,15 +1266,28 @@ def add_contingency_result_variables(
             "configured_variables": sum(
                 len(item["variables"]) for item in configured
             ),
+            "added_variables": sum(len(item["added"]) for item in configured),
+            "already_recorded_variables": sum(
+                len(item["already_recorded"]) for item in configured
+            ),
             "truncated": len(objects) > object_limit,
             "results": configured,
-            "message": (
+        }
+        if response["added_variables"]:
+            response["message"] = (
                 "Result recording selection updated; rerun contingency analysis "
                 "to populate the added variables"
-            ),
-        }
+            )
+        else:
+            response["message"] = (
+                "All requested variables were already recorded; no change"
+            )
         if errors:
-            response["message"] = "Some result variables could not be configured"
+            response["message"] = (
+                "Some result variables could not be configured; "
+                + response["message"][0].lower()
+                + response["message"][1:]
+            )
             response["errors"] = errors
         return response
 
